@@ -1,5 +1,6 @@
 from abc import abstractmethod
 import math
+from typing import Any, Mapping
 
 import numpy as np
 import torch as th
@@ -17,6 +18,16 @@ from util import (
 )
 from attention import SpatialTransformer, SpatialTransformer3D, exists
 
+
+from diffusers.configuration_utils import ConfigMixin
+from diffusers.models.modeling_utils import ModelMixin
+class MultiViewUNetWrapperModel(ModelMixin, ConfigMixin):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.unet: MultiViewUNetModel = MultiViewUNetModel(*args, **kwargs)
+    
+    def forward(self, *args, **kwargs):
+        return self.unet(*args, **kwargs)
 
 # dummy replace
 def convert_module_to_f16(x):

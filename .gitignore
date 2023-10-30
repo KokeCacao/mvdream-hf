@@ -2,3 +2,4 @@
 *.yaml
 converted
 __pycache__
+*.png

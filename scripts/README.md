@@ -14,6 +14,5 @@ wget https://raw.githubusercontent.com/bytedance/MVDream/main/mvdream/configs/sd
 
 Hugging Face diffusers weights are converted by script:
 ```bash
-mkdir converted
 python ./scripts/convert_mvdream_to_diffusers.py --checkpoint_path ./sd-v1.5-4view.pt --dump_path ./converted --original_config_file ./sd-v1.yaml
 ```

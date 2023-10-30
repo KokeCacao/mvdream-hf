@@ -20,7 +20,7 @@ from diffusers.utils import logging
 from accelerate import init_empty_weights
 from accelerate.utils import set_module_tensor_to_device
 from rich import print, print_json
-from models import MultiViewUNetModel
+from models import MultiViewUNetModel, MultiViewUNetWrapperModel
 from pipeline_mvdream import MVDreamStableDiffusionPipeline
 from transformers import CLIPTokenizer, CLIPTextModel
 
@@ -659,7 +659,6 @@ def conv_attn_to_linear(checkpoint):
             if checkpoint[key].ndim > 2:
                 checkpoint[key] = checkpoint[key][:, :, 0]
 
-
 def convert_from_original_mvdream_ckpt(
     checkpoint_path,
     original_config_file,
@@ -667,13 +666,13 @@ def convert_from_original_mvdream_ckpt(
     device
 ):
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    print(f"Checkpoint: {checkpoint.keys()}")
+    # print(f"Checkpoint: {checkpoint.keys()}")
     torch.cuda.empty_cache()
 
     from omegaconf import OmegaConf
 
     original_config = OmegaConf.load(original_config_file)
-    print(f"Original Config: {original_config}")
+    # print(f"Original Config: {original_config}")
     prediction_type = "epsilon"
     image_size = 256
     num_train_timesteps = getattr(original_config.model.params, "timesteps", None) or 1000
@@ -700,10 +699,11 @@ def convert_from_original_mvdream_ckpt(
     # converted_unet_checkpoint = convert_ldm_unet_checkpoint(
     #     checkpoint, unet_config, path=None, extract_ema=extract_ema
     # )
-    print(f"Unet Config: {original_config.model.params.unet_config.params}")
-    unet: MultiViewUNetModel = MultiViewUNetModel(**original_config.model.params.unet_config.params)
+    # print(f"Unet Config: {original_config.model.params.unet_config.params}")
+    unet: MultiViewUNetWrapperModel = MultiViewUNetWrapperModel(**original_config.model.params.unet_config.params)
+    # print(f"Unet State Dict: {unet.state_dict().keys()}")
     unet.load_state_dict({
-        key.replace("model.diffusion_model.", ""): value for key, value in checkpoint.items() if key.replace("model.diffusion_model.", "") in unet.state_dict()
+        key.replace("model.diffusion_model.", "unet."): value for key, value in checkpoint.items() if key.replace("model.diffusion_model.", "unet.") in unet.state_dict()
     })
     for param_name, param in unet.state_dict().items():
         set_module_tensor_to_device(unet, param_name, "cuda:0", value=param)
@@ -738,9 +738,6 @@ def convert_from_original_mvdream_ckpt(
         tokenizer=tokenizer,
         text_encoder=text_encoder,
         scheduler=scheduler,
-        safety_checker=None,
-        feature_extractor=None,
-        requires_safety_checker=False
     )
 
     return pipe
@@ -787,8 +784,15 @@ if __name__ == "__main__":
     if args.half:
         pipe.to(torch_dtype=torch.float16)
     
-    out = pipe()
+    images = pipe(
+        prompt="Head of Hatsune Miku",
+        negative_prompt="painting, bad quality, flat",
+        output_type="pil",
+        return_dict=False,
+        guidance_scale=7.5,
+        num_inference_steps=50,
+    )
+    for i, image in enumerate(images):
+        image.save(f"image_{i}.png")
     
-    assert False
-
     pipe.save_pretrained(args.dump_path, safe_serialization=args.to_safetensors)
