@@ -1,5 +1,4 @@
 *.pt
 *.yaml
-converted
-__pycache__
-*.png
+**/__pycache__
+*.pyc
