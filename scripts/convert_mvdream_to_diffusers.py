@@ -9,13 +9,13 @@ sys.path.insert(0, '../')
 from diffusers.models import (
     AutoencoderKL,
 )
+from omegaconf import OmegaConf
 from diffusers.schedulers import DDIMScheduler
 from diffusers.utils import logging
-
+from typing import Any
 from accelerate import init_empty_weights
 from accelerate.utils import set_module_tensor_to_device
-from rich import print, print_json
-from models import MultiViewUNetModel, MultiViewUNetWrapperModel
+from models import MultiViewUNetWrapperModel
 from pipeline_mvdream import MVDreamStableDiffusionPipeline
 from transformers import CLIPTokenizer, CLIPTextModel
 
@@ -259,13 +259,13 @@ def conv_attn_to_linear(checkpoint):
             if checkpoint[key].ndim > 2:
                 checkpoint[key] = checkpoint[key][:, :, 0]
 
+def create_unet_config(original_config) -> Any:
+    return OmegaConf.to_container(original_config.model.params.unet_config.params, resolve=True)
 
 def convert_from_original_mvdream_ckpt(checkpoint_path, original_config_file, device):
     checkpoint = torch.load(checkpoint_path, map_location=device)
     # print(f"Checkpoint: {checkpoint.keys()}")
     torch.cuda.empty_cache()
-
-    from omegaconf import OmegaConf
 
     original_config = OmegaConf.load(original_config_file)
     # print(f"Original Config: {original_config}")
@@ -296,11 +296,13 @@ def convert_from_original_mvdream_ckpt(checkpoint_path, original_config_file, de
     #     checkpoint, unet_config, path=None, extract_ema=extract_ema
     # )
     # print(f"Unet Config: {original_config.model.params.unet_config.params}")
-    unet: MultiViewUNetWrapperModel = MultiViewUNetWrapperModel(**original_config.model.params.unet_config.params)
+    unet_config = create_unet_config(original_config)
+    unet: MultiViewUNetWrapperModel = MultiViewUNetWrapperModel(**unet_config)
+    unet.register_to_config(**unet_config)
     # print(f"Unet State Dict: {unet.state_dict().keys()}")
     unet.load_state_dict({key.replace("model.diffusion_model.", "unet."): value for key, value in checkpoint.items() if key.replace("model.diffusion_model.", "unet.") in unet.state_dict()})
     for param_name, param in unet.state_dict().items():
-        set_module_tensor_to_device(unet, param_name, "cuda:0", value=param)
+        set_module_tensor_to_device(unet, param_name, device=device, value=param)
 
     # Convert the VAE model.
     vae_config = create_vae_diffusers_config(original_config, image_size=image_size)
@@ -316,17 +318,17 @@ def convert_from_original_mvdream_ckpt(checkpoint_path, original_config_file, de
     with init_empty_weights():
         vae = AutoencoderKL(**vae_config)
 
+    for param_name, param in converted_vae_checkpoint.items():
+        set_module_tensor_to_device(vae, param_name, device=device, value=param)
+
     if original_config.model.params.unet_config.params.context_dim == 768:
         tokenizer: CLIPTokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
-        text_encoder: CLIPTextModel = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(device=torch.device("cuda:0")) # type: ignore
+        text_encoder: CLIPTextModel = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(device=device) # type: ignore
     elif original_config.model.params.unet_config.params.context_dim == 1024:
         tokenizer: CLIPTokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2-1", subfolder="tokenizer")
-        text_encoder: CLIPTextModel = CLIPTextModel.from_pretrained("stabilityai/stable-diffusion-2-1", subfolder="text_encoder").to(device=torch.device("cuda:0")) # type: ignore
+        text_encoder: CLIPTextModel = CLIPTextModel.from_pretrained("stabilityai/stable-diffusion-2-1", subfolder="text_encoder").to(device=device) # type: ignore
     else:
         raise ValueError(f"Unknown context_dim: {original_config.model.paams.unet_config.params.context_dim}")
-
-    for param_name, param in converted_vae_checkpoint.items():
-        set_module_tensor_to_device(vae, param_name, "cuda:0", value=param)
 
     pipe = MVDreamStableDiffusionPipeline(
         vae=vae,
@@ -359,6 +361,8 @@ if __name__ == "__main__":
     parser.add_argument("--dump_path", default=None, type=str, required=True, help="Path to the output model.")
     parser.add_argument("--device", type=str, help="Device to use (e.g. cpu, cuda:0, cuda:1, etc.)")
     args = parser.parse_args()
+    
+    args.device = torch.device(args.device if args.device is not None else "cuda" if torch.cuda.is_available() else "cpu")
 
     pipe = convert_from_original_mvdream_ckpt(
         checkpoint_path=args.checkpoint_path,
@@ -369,15 +373,36 @@ if __name__ == "__main__":
     if args.half:
         pipe.to(torch_dtype=torch.float16)
 
-    if args.test:
-        images = pipe(
-            prompt="Head of Hatsune Miku",
-            negative_prompt="painting, bad quality, flat",
-            output_type="pil",
-            guidance_scale=7.5,
-            num_inference_steps=50,
-        )
-        for i, image in enumerate(images):
-            image.save(f"image_{i}.png") # type: ignore
-
+    print(f"Saving pipeline to {args.dump_path}...")
     pipe.save_pretrained(args.dump_path, safe_serialization=args.to_safetensors)
+    
+    if args.test:
+        try:
+            print(f"Testing each subcomponent of the pipeline...")
+            images = pipe(
+                prompt="Head of Hatsune Miku",
+                negative_prompt="painting, bad quality, flat",
+                output_type="pil",
+                guidance_scale=7.5,
+                num_inference_steps=50,
+                device=args.device,
+            )
+            for i, image in enumerate(images):
+                image.save(f"image_{i}.png") # type: ignore
+
+            print(f"Testing entire pipeline...")
+            loaded_pipe: MVDreamStableDiffusionPipeline = MVDreamStableDiffusionPipeline.from_pretrained(args.dump_path, safe_serialization=args.to_safetensors) # type: ignore
+            images = loaded_pipe(
+                prompt="Head of Hatsune Miku",
+                negative_prompt="painting, bad quality, flat",
+                output_type="pil",
+                guidance_scale=7.5,
+                num_inference_steps=50,
+                device=args.device,
+            )
+            for i, image in enumerate(images):
+                image.save(f"image_{i}.png") # type: ignore
+        except Exception as e:
+            print(f"Failed to test inference: {e}")
+            raise e from e
+        print("Inference test passed!")

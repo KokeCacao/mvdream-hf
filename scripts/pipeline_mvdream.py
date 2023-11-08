@@ -1,16 +1,14 @@
 import torch
 import numpy as np
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Callable, List, Optional, Union
 from transformers import CLIPTextModel, CLIPTokenizer
 from diffusers import AutoencoderKL, DiffusionPipeline
-from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.utils import (
     deprecate,
     is_accelerate_available,
     is_accelerate_version,
     logging,
-    replace_example_docstring,
 )
 from diffusers.configuration_utils import FrozenDict
 from diffusers.schedulers import DDIMScheduler
@@ -20,6 +18,7 @@ except ImportError:
     from diffusers.utils.torch_utils import randn_tensor # new import # type: ignore
 
 from models import MultiViewUNetWrapperModel
+from accelerate.utils import set_module_tensor_to_device
 
 logger = logging.get_logger(__name__) # pylint: disable=invalid-name
 
@@ -391,9 +390,13 @@ class MVDreamStableDiffusionPipeline(DiffusionPipeline):
         output_type: Optional[str] = "pil",
         callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
         callback_steps: int = 1,
+        batch_size: int = 4,
+        device = torch.device("cuda:0"),
     ):
-        batch_size = 4
-        device = torch.device("cuda:0")
+        self.unet = self.unet.to(device=device)
+        self.vae = self.vae.to(device=device)
+
+        self.text_encoder = self.text_encoder.to(device=device)
 
         camera = get_camera(batch_size).to(device=device)
 

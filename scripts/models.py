@@ -25,9 +25,72 @@ from torch import Tensor
 
 class MultiViewUNetWrapperModel(ModelMixin, ConfigMixin):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, 
+            image_size,
+            in_channels,
+            model_channels,
+            out_channels,
+            num_res_blocks,
+            attention_resolutions,
+            dropout=0,
+            channel_mult=(1, 2, 4, 8),
+            conv_resample=True,
+            dims=2,
+            num_classes=None,
+            use_checkpoint=False,
+            use_fp16=False,
+            use_bf16=False,
+            num_heads=-1,
+            num_head_channels=-1,
+            num_heads_upsample=-1,
+            use_scale_shift_norm=False,
+            resblock_updown=False,
+            use_new_attention_order=False,
+            use_spatial_transformer=False, # custom transformer support
+            transformer_depth=1, # custom transformer support
+            context_dim=None, # custom transformer support
+            n_embed=None, # custom support for prediction of discrete ids into codebook of first stage vq model
+            legacy=True,
+            disable_self_attentions=None,
+            num_attention_blocks=None,
+            disable_middle_self_attn=False,
+            use_linear_in_transformer=False,
+            adm_in_channels=None,
+            camera_dim=None,):
         super().__init__()
-        self.unet: MultiViewUNetModel = MultiViewUNetModel(*args, **kwargs)
+        self.unet: MultiViewUNetModel = MultiViewUNetModel(
+            image_size=image_size,
+            in_channels=in_channels,
+            model_channels=model_channels,
+            out_channels=out_channels,
+            num_res_blocks=num_res_blocks,
+            attention_resolutions=attention_resolutions,
+            dropout=dropout,
+            channel_mult=channel_mult,
+            conv_resample=conv_resample,
+            dims=dims,
+            num_classes=num_classes,
+            use_checkpoint=use_checkpoint,
+            use_fp16=use_fp16,
+            use_bf16=use_bf16,
+            num_heads=num_heads,
+            num_head_channels=num_head_channels,
+            num_heads_upsample=num_heads_upsample,
+            use_scale_shift_norm=use_scale_shift_norm,
+            resblock_updown=resblock_updown,
+            use_new_attention_order=use_new_attention_order,
+            use_spatial_transformer=use_spatial_transformer,
+            transformer_depth=transformer_depth,
+            context_dim=context_dim,
+            n_embed=n_embed,
+            legacy=legacy,
+            disable_self_attentions=disable_self_attentions,
+            num_attention_blocks=num_attention_blocks,
+            disable_middle_self_attn=disable_middle_self_attn,
+            use_linear_in_transformer=use_linear_in_transformer,
+            adm_in_channels=adm_in_channels,
+            camera_dim=camera_dim,
+        )
 
     def forward(self, *args, **kwargs):
         return self.unet(*args, **kwargs)

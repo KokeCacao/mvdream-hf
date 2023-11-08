@@ -12,8 +12,8 @@ from typing import Optional, Any
 from util import checkpoint
 
 try:
-    import xformers
-    import xformers.ops
+    import xformers # type: ignore
+    import xformers.ops # type: ignore
     XFORMERS_IS_AVAILBLE = True
 except:
     XFORMERS_IS_AVAILBLE = False
